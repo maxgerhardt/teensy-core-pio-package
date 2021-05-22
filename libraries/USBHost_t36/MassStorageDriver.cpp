@@ -63,6 +63,8 @@ bool msController::claim(Device_t *dev, int type, const uint8_t *descriptors, ui
 	if (descriptors[6] != 6) return false; // bInterfaceSubClass, 6 = SCSI transparent command set (SCSI Standards)
 	if (descriptors[7] != 80) return false; // bInterfaceProtocol, 80 = BULK-ONLY TRANSPORT
 
+	bInterfaceNumber = descriptors[2];
+
 	uint8_t desc_index = 9;
 	uint8_t in_index = 0xff, out_index = 0xff;
 
@@ -115,8 +117,10 @@ bool msController::claim(Device_t *dev, int type, const uint8_t *descriptors, ui
 	msDriveInfo.initialized = false;
 	msDriveInfo.connected = true;
 #ifdef DBGprint
-	Serial.printf("   connected %d\n",msDriveInfo.connected);
-	Serial.printf("   initialized %d\n",msDriveInfo.initialized);
+	print("   connected = ");
+	println(msDriveInfo.connected);
+	print("   initialized = ");
+	println(msDriveInfo.initialized);
 #endif	
 	return true;
 }
@@ -130,8 +134,10 @@ void msController::disconnect()
 	memset(&msDriveInfo, 0, sizeof(msDriveInfo_t));
 
 #ifdef DBGprint
-	Serial.printf("   connected %d\n",msDriveInfo.connected);
-	Serial.printf("   initialized %d\n",msDriveInfo.initialized);
+	print("   connected ");
+	println(msDriveInfo.connected);
+	print("   initialized ");
+	println(msDriveInfo.initialized);
 #endif
 }
 
@@ -176,13 +182,27 @@ void msController::new_dataIn(const Transfer_t *transfer)
 	uint32_t len = transfer->length - ((transfer->qtd.token >> 16) & 0x7FFF);
 	println("msController dataIn (static): ", len, DEC);
 	print_hexbytes((uint8_t*)transfer->buffer, (len < 32)? len : 32 );
-	msInCompleted = true; // Last in transaction is completed.
+	if (_read_sectors_callback) {
+		_emlastRead = 0; // remember that we received something. 
+		(*_read_sectors_callback)(_read_sectors_token, (uint8_t*)transfer->buffer);
+		_read_sectors_remaining--;
+		if (_read_sectors_remaining > 1) queue_Data_Transfer(datapipeIn, transfer->buffer, len, this);
+		if (!_read_sectors_remaining) {
+			_read_sectors_callback = nullptr;
+			msInCompleted = true; // Last in transaction is completed.
+		}
+#ifdef DBGprint
+		Serial.write('@');
+		if ((_read_sectors_remaining & 0x3f) == 0) Serial.printf("\n");
+#endif
+	}
+	else msInCompleted = true; // Last in transaction is completed.
 }
 
 // Initialize Mass Storage Device
 uint8_t msController::mscInit(void) {
 #ifdef DBGprint
-	Serial.printf("mscIint()\n");
+	println("mscIint()");
 #endif
 	uint8_t msResult = MS_CBW_PASS;
 
@@ -194,16 +214,18 @@ uint8_t msController::mscInit(void) {
 			return MS_NO_MEDIA_ERR;  // Not connected Error.
 		}
 		yield();
-	} while(!available()); 
-	
+	} while(!available());
+  
 	msReset();
-	delay(500);
+	// delay(500); // Not needed any more.
 	maxLUN = msGetMaxLun();
+
 //	msResult = msReportLUNs(&maxLUN);
-//Serial.printf("maxLUN = %d\n",maxLUN);
+//println("maxLUN = ");
+//println(maxLUN);
 //	delay(150);
 	//-------------------------------------------------------
-//	msResult = msStartStopUnit(1);
+	msResult = msStartStopUnit(1);
 	msResult = WaitMediaReady();
 	if(msResult)
 		return msResult;
@@ -228,11 +250,11 @@ uint8_t msController::mscInit(void) {
 
 //---------------------------------------------------------------------------
 // Perform Mass Storage Reset
-void msController::msReset() {
+void msController::msReset(void) {
 #ifdef DBGprint
-	Serial.printf("msReset()\n");
+	println("msReset()");
 #endif
-	mk_setup(setup, 0x21, 0xff, 0, 0, 0);
+	mk_setup(setup, 0x21, 0xff, 0, bInterfaceNumber, 0);
 	queue_Control_Transfer(device, &setup, NULL, this);
 	while (!msControlCompleted) yield();
 	msControlCompleted = false;
@@ -240,12 +262,12 @@ void msController::msReset() {
 
 //---------------------------------------------------------------------------
 // Get MAX LUN
-uint8_t msController::msGetMaxLun() {
+uint8_t msController::msGetMaxLun(void) {
 #ifdef DBGprint
-	Serial.printf("msGetMaxLun()\n");
+	println("msGetMaxLun()");
 #endif
 	report[0] = 0;
-	mk_setup(setup, 0xa1, 0xfe, 0, 0, 1);
+	mk_setup(setup, 0xa1, 0xfe, 0, bInterfaceNumber, 1);
 	queue_Control_Transfer(device, &setup, report, this);
 	while (!msControlCompleted) yield();
 	msControlCompleted = false;
@@ -257,7 +279,7 @@ uint8_t msController::WaitMediaReady() {
 	uint8_t msResult;
 	uint32_t start = millis();
 #ifdef DBGprint
-	Serial.printf("WaitMediaReady()\n");
+	println("WaitMediaReady()");
 #endif
 	do {
 		if((millis() - start) >= MEDIA_READY_TIMEOUT) {
@@ -273,7 +295,7 @@ uint8_t msController::WaitMediaReady() {
 uint8_t msController::checkConnectedInitialized(void) {
 	uint8_t msResult = MS_CBW_PASS;
 #ifdef DBGprint
-	Serial.printf("checkConnectedInitialized()\n");
+	print("checkConnectedInitialized()");
 #endif
 	if(!msDriveInfo.connected) {
 		return MS_NO_MEDIA_ERR;
@@ -293,19 +315,23 @@ uint8_t msController::msDoCommand(msCommandBlockWrapper_t *CBW,	void *buffer)
 	uint8_t CSWResult = 0;
 	mscTransferComplete = false;
 #ifdef DBGprint
-	Serial.printf("msDoCommand():\n");
+	println("msDoCommand()");
 #endif	
 	if(CBWTag == 0xFFFFFFFF) CBWTag = 1;
+	// digitalWriteFast(2, HIGH);
 	queue_Data_Transfer(datapipeOut, CBW, sizeof(msCommandBlockWrapper_t), this); // Command stage.
 	while(!msOutCompleted) yield();
+	// digitalWriteFast(2, LOW);
 	msOutCompleted = false;
 	if((CBW->Flags == CMD_DIR_DATA_IN)) { // Data stage from device.
 		queue_Data_Transfer(datapipeIn, buffer, CBW->TransferLength, this);
 	while(!msInCompleted) yield();
+	// digitalWriteFast(2, HIGH);
 	msInCompleted = false;
 	} else {							  // Data stage to device.
 		queue_Data_Transfer(datapipeOut, buffer, CBW->TransferLength, this);
 	while(!msOutCompleted) yield();
+	// digitalWriteFast(2, LOW);
 	msOutCompleted = false;
 	}
 	CSWResult = msGetCSW(); // Status stage.
@@ -327,7 +353,7 @@ uint8_t msController::msDoCommand(msCommandBlockWrapper_t *CBW,	void *buffer)
 // Get Command Status Wrapper
 uint8_t msController::msGetCSW(void) {
 #ifdef DBGprint
-	Serial.printf("msGetCSW()\n");
+	println("msGetCSW()");
 #endif
 	msCommandStatusWrapper_t StatusBlockWrapper = (msCommandStatusWrapper_t)
 	{
@@ -349,7 +375,7 @@ uint8_t msController::msGetCSW(void) {
 // Test Unit Ready
 uint8_t msController::msTestReady() {
 #ifdef DBGprint
-	Serial.printf("msTestReady()\n");
+	println("msTestReady()");
 #endif
 	msCommandBlockWrapper_t CommandBlockWrapper = (msCommandBlockWrapper_t)
 	{
@@ -371,7 +397,7 @@ uint8_t msController::msTestReady() {
 // Start/Stop unit
 uint8_t msController::msStartStopUnit(uint8_t mode) {
 #ifdef DBGprint
-	Serial.printf("msStartStopUnit()\n");
+	println("msStartStopUnit()");
 #endif
 	msCommandBlockWrapper_t CommandBlockWrapper = (msCommandBlockWrapper_t)
 	{
@@ -393,7 +419,7 @@ uint8_t msController::msStartStopUnit(uint8_t mode) {
 // Read Mass Storage Device Capacity (Number of Blocks and Block Size)
 uint8_t msController::msReadDeviceCapacity(msSCSICapacity_t * const Capacity) {
 #ifdef DBGprint
-	Serial.printf("msReadDeviceCapacity()\n");
+	println("msReadDeviceCapacity()");
 #endif
 	uint8_t result = 0;
 	msCommandBlockWrapper_t CommandBlockWrapper = (msCommandBlockWrapper_t)
@@ -417,7 +443,7 @@ uint8_t msController::msReadDeviceCapacity(msSCSICapacity_t * const Capacity) {
 uint8_t msController::msDeviceInquiry(msInquiryResponse_t * const Inquiry)
 {
 #ifdef DBGprint
-	Serial.printf("msDeviceInquiry()\n");
+	println("msDeviceInquiry()");
 #endif
 	msCommandBlockWrapper_t CommandBlockWrapper = (msCommandBlockWrapper_t)
 	{
@@ -437,7 +463,7 @@ uint8_t msController::msDeviceInquiry(msInquiryResponse_t * const Inquiry)
 uint8_t msController::msRequestSense(msRequestSenseResponse_t * const Sense)
 {
 #ifdef DBGprint
-	Serial.printf("msRequestSense()\n");
+	println("msRequestSense()");
 #endif
 	msCommandBlockWrapper_t CommandBlockWrapper = (msCommandBlockWrapper_t)
 	{
@@ -457,7 +483,7 @@ uint8_t msController::msRequestSense(msRequestSenseResponse_t * const Sense)
 uint8_t msController::msReportLUNs(uint8_t *Buffer)
 {
 #ifdef DBGprint
-	Serial.printf("msReportLuns()\n");
+	println("msReportLuns()");
 #endif
 	msCommandBlockWrapper_t CommandBlockWrapper = (msCommandBlockWrapper_t)
 	{
@@ -481,8 +507,9 @@ uint8_t msController::msReadBlocks(
 									const uint16_t BlockSize,
 									void * sectorBuffer)
 	{
+	println("msReadBlocks()");
 #ifdef DBGprint
-	Serial.printf("msReadBlocks()\n");
+	Serial.printf("<<< msReadBlocks(%x %x %x)\n", BlockAddress, Blocks, BlockSize);
 #endif
 	uint8_t BlockHi = (Blocks >> 8) & 0xFF;
 	uint8_t BlockLo = Blocks & 0xFF;
@@ -506,6 +533,96 @@ uint8_t msController::msReadBlocks(
 }
 
 //---------------------------------------------------------------------------
+// Read Sectors (Multi Sector Capable)
+
+uint8_t msController::msReadSectorsWithCB(
+									const uint32_t BlockAddress,
+									const uint16_t Blocks,
+									void (*callback)(uint32_t, uint8_t *), 
+									uint32_t token)	
+	{
+#ifdef DBGprint
+	Serial.printf("<<< msReadSectorsWithCB(%x %u %x)\n", BlockAddress, Blocks, (uint32_t)callback);
+#endif
+	if ((callback == nullptr) || (!Blocks)) return MS_CBW_FAIL;
+
+	uint8_t BlockHi = (Blocks >> 8) & 0xFF;
+	uint8_t BlockLo = Blocks & 0xFF;
+	static const uint16_t BlockSize = 512;
+
+	msCommandBlockWrapper_t CommandBlockWrapper = (msCommandBlockWrapper_t)
+	{
+	
+		.Signature          = CBW_SIGNATURE,
+		.Tag                = ++CBWTag,
+		.TransferLength     = (uint32_t)(Blocks * BlockSize),
+		.Flags              = CMD_DIR_DATA_IN,
+		.LUN                = currentLUN,
+		.CommandLength      = 10,
+		.CommandData        = {CMD_RD_10, 0x00,
+							  (uint8_t)(BlockAddress >> 24),
+							  (uint8_t)(BlockAddress >> 16),
+							  (uint8_t)(BlockAddress >> 8),
+							  (uint8_t)(BlockAddress & 0xFF),
+							   0x00, BlockHi, BlockLo, 0x00}
+	};
+
+	// We need to remember how many blocks and call back function
+	_read_sectors_callback = callback;
+	_read_sectors_remaining = Blocks;
+	_read_sectors_token = token;
+	_emlastRead = 0; // reset the timeout. 
+
+	// lets unwrap the msDoCommand here...
+	uint8_t CSWResult = 0;
+	mscTransferComplete = false;
+
+	if(CBWTag == 0xFFFFFFFF) CBWTag = 1;
+	// digitalWriteFast(2, HIGH);
+	queue_Data_Transfer(datapipeOut, &CommandBlockWrapper, sizeof(msCommandBlockWrapper_t), this); // Command stage.
+
+	while(!msOutCompleted && (_emlastRead < READ_CALLBACK_TIMEOUT_MS)) yield();
+	// digitalWriteFast(2, LOW);
+
+	msOutCompleted = false;
+
+	queue_Data_Transfer(datapipeIn, _read_sector_buffer1, BlockSize, this);
+	if (_read_sectors_remaining > 1) 	queue_Data_Transfer(datapipeIn, _read_sector_buffer2, BlockSize, this);
+
+	while(!msInCompleted && (_emlastRead < READ_CALLBACK_TIMEOUT_MS)) ;
+	// digitalWriteFast(2, HIGH);
+
+	if (!msInCompleted) {
+		// clear this out..
+		#ifdef DBGprint
+			Serial.printf("!!! msReadBlocks Timed Out(%u)\n", _read_sectors_remaining);
+		#endif
+		_read_sectors_callback = nullptr;
+		_read_sectors_remaining = 0;
+		return MS_CBW_FAIL;
+	}	
+
+	msInCompleted = false;
+
+	CSWResult = msGetCSW(); // Status stage.
+	#ifdef DBGprint
+	Serial.printf("  CSWResult: %x CD:%x\n", CSWResult, CommandBlockWrapper.CommandData[0] );
+	#endif
+	// All stages of this transfer have completed.
+	//Check for special cases. 
+	//If test for unit ready command is given then
+	//  return the CSW status byte.
+	//Bit 0 == 1 == not ready else
+	//Bit 0 == 0 == ready.
+	//And the Start/Stop Unit command as well.
+	if((CommandBlockWrapper.CommandData[0] == CMD_TEST_UNIT_READY) ||
+	   (CommandBlockWrapper.CommandData[0] == CMD_START_STOP_UNIT))
+		return CSWResult;
+	return msProcessError(CSWResult);
+}
+
+
+//---------------------------------------------------------------------------
 // Write Sectors (Multi Sector Capable)
 uint8_t msController::msWriteBlocks(
                                   const uint32_t BlockAddress,
@@ -514,7 +631,7 @@ uint8_t msController::msWriteBlocks(
 								  const void * sectorBuffer)
 	{
 #ifdef DBGprint
-	Serial.printf("msWriteBlocks()\n");
+	println("msWriteBlocks()");
 #endif
 	uint8_t BlockHi = (Blocks >> 8) & 0xFF;
 	uint8_t BlockLo = Blocks & 0xFF;
@@ -539,7 +656,7 @@ uint8_t msController::msWriteBlocks(
 // Proccess Possible SCSI errors
 uint8_t msController::msProcessError(uint8_t msStatus) {
 #ifdef DBGprint
-	Serial.printf("msProcessError()\n");
+	println("msProcessError()");
 #endif
 	uint8_t msResult = 0;
 	switch(msStatus) {
@@ -547,50 +664,30 @@ uint8_t msController::msProcessError(uint8_t msStatus) {
 			return MS_CBW_PASS;
 			break;
 		case MS_CBW_PHASE_ERROR:
-			Serial.printf("SCSI Phase Error: %d\n",msStatus);
+			print("SCSI Phase Error: ");
+			println(msStatus);
 			return MS_SCSI_ERROR;
 			break;
 		case MS_CSW_TAG_ERROR:
-			Serial.printf("CSW Tag Error: %d\n",MS_CSW_TAG_ERROR);
+			print("CSW Tag Error: ");
+			println(MS_CSW_TAG_ERROR);
 			return MS_CSW_TAG_ERROR;
 			break;
 		case MS_CSW_SIG_ERROR:
-			Serial.printf("CSW Signature Error: %d\n",MS_CSW_SIG_ERROR);
+			print("CSW Signature Error: ");
+			println(MS_CSW_SIG_ERROR);
 			return MS_CSW_SIG_ERROR;
 			break;
 		case MS_CBW_FAIL:
-			msResult = msRequestSense(&msSense);
-			if(msResult) return msResult;
-			switch(msSense.SenseKey) {
-				case MS_UNIT_ATTENTION:
-					switch(msSense.AdditionalSenseCode) {
-						case MS_MEDIA_CHANGED:
-							return MS_MEDIA_CHANGED_ERR;
-							break;
-						default:
-							msStatus = MS_UNIT_NOT_READY;
-					}
-				case MS_NOT_READY:
-					switch(msSense.AdditionalSenseCode) {
-						case MS_MEDIUM_NOT_PRESENT:
-							msStatus = MS_NO_MEDIA_ERR;
-							break;
-						default:
-							 msStatus = MS_UNIT_NOT_READY;
-					}
-				case MS_ILLEGAL_REQUEST:
-					switch(msSense.AdditionalSenseCode) {
-						case MS_LBA_OUT_OF_RANGE:
-							msStatus = MS_BAD_LBA_ERR;
-							break;
-						default:
-							msStatus = MS_CMD_ERR;
-					}
-				default:
-					msStatus = MS_SCSI_ERROR;
+			if((msResult = msRequestSense(&msSense))) {
+				print("Failed to get sense codes. Returned code: ");
+				println(msResult);
 			}
+			return MS_CBW_FAIL;
+			break;
 		default:
-			Serial.printf("SCSI Error: %d\n",msStatus);
+			print("SCSI Error: ");
+			println(msStatus);
 			return msStatus;
 	}
 }

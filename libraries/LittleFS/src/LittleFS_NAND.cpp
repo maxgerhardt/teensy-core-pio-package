@@ -81,14 +81,14 @@ bool LittleFS_SPINAND::begin(uint8_t cspin, SPIClass &spiport)
 	digitalWrite(pin, HIGH);
 	port->endTransaction();
 
-	Serial.printf("Flash ID: %02X %02X %02X\n", buf[2], buf[3], buf[4]);
+	//Serial.printf("Flash ID: %02X %02X %02X\n", buf[2], buf[3], buf[4]);
 	const struct chipinfo *info = chip_lookup(buf+2);
 	if (!info) return false;
-	Serial.printf("Flash size is %.2f Mbyte\n", (float)info->chipsize / 1048576.0f);
+	//Serial.printf("Flash size is %.2f Mbyte\n", (float)info->chipsize / 1048576.0f);
 	
 	//capacityID = buf[3];   //W25N01G has 1 die, W25N02G had 2 dies
 	deviceID = (buf[2] << 16) | (buf[3] << 8) | (buf[4]);
-	Serial.printf("Device ID: 0x%6X\n", deviceID);
+	//Serial.printf("Device ID: 0x%6X\n", deviceID);
 	
 	if(deviceID == W25N01) { 
 		die = 1;
@@ -166,7 +166,8 @@ static void printtbuf(const void *buf, unsigned int len)
 	//Serial.println();
 }
 
-static bool blockIsBlank(struct lfs_config *config, lfs_block_t block, void *readBuf)
+static bool blockIsBlank(struct lfs_config *config, lfs_block_t block, void *readBuf, bool full=true );
+static bool blockIsBlank(struct lfs_config *config, lfs_block_t block, void *readBuf, bool full)
 {
 	if (!readBuf) return false;
 	for (lfs_off_t offset=0; offset < config->block_size; offset += config->read_size) {
@@ -177,6 +178,8 @@ static bool blockIsBlank(struct lfs_config *config, lfs_block_t block, void *rea
 		for (unsigned int i=0; i < config->read_size; i++) {
 			if (buf[i] != 0xFF) return false;
 		}
+		if ( !full )
+			return true; // first bytes read as 0xFF
 	}
 	return true; // all bytes read as 0xFF
 }
@@ -670,6 +673,7 @@ uint8_t LittleFS_SPINAND::addBBLUT(uint32_t block_address)
 	Serial.printf("First Open Entry: %d\n", firstOpenEntry);
 	
 	//Write BBLUT with next sequential block
+	#ifdef LATER
 	uint8_t cmd[5];
 	
 	uint16_t pba, lba;
@@ -688,7 +692,7 @@ uint8_t LittleFS_SPINAND::addBBLUT(uint32_t block_address)
 	//port->transfer(cmd, 5);
     //digitalWrite(pin, HIGH);
     //port->endTransaction();
-	
+	#endif
 	wait(progtime);
 	
   }
@@ -716,11 +720,11 @@ void LittleFS_SPINAND::deviceReset()
 
 }
 
-bool LittleFS_SPINAND::lowLevelFormat(char progressChar)
+bool LittleFS_SPINAND::lowLevelFormat(char progressChar, Print* pr)
 {
 	uint32_t eraseAddr;
 	bool val;
-	val = LittleFS::lowLevelFormat(progressChar);
+	val = LittleFS::lowLevelFormat(progressChar, pr);
 	
 	for(uint16_t blocks = 0; blocks < reservedBBMBlocks; blocks++) {
 		eraseAddr = (config.block_count + blocks) * config.block_size;
@@ -897,7 +901,7 @@ bool LittleFS_QPINAND::begin() {
 	
 	//capacityID = buf[3];   //W25N01G has 1 die, W25N02G had 2 dies
 	deviceID = (buf[1] << 16) | (buf[2] << 8) | (buf[3]);
-	Serial.printf("Device ID: 0x%6X\n", deviceID);
+	//Serial.printf("Device ID: 0x%6X\n", deviceID);
 	
 	if(deviceID == W25N01) { 
 		die = 1;
@@ -974,7 +978,7 @@ bool LittleFS_QPINAND::begin() {
   writeStatusRegister(0xB0, (1 << 4) | (1 << 3));
   readStatusRegister(0xB0, false);
   
-	Serial.println("attempting to mount existing media");
+	//Serial.println("attempting to mount existing media");
 	if (lfs_mount(&lfs, &config) < 0) {
 		Serial.println("couldn't mount media, attemping to format");
 		if (lfs_format(&lfs, &config) < 0) {
@@ -1407,7 +1411,7 @@ uint8_t LittleFS_QPINAND::addBBLUT(uint32_t block_address)
 	//lba = LINEAR_TO_BLOCK((firstOpenEntry+1)*config.block_size);
 	lba = LINEAR_TO_BLOCK((firstOpenEntry+1)*blocksize + chipsize);
 	Serial.printf("PBA: %d, LBA: %d\n", pba, lba);
-	
+	#ifdef LATER	
 	uint8_t cmd[4];
 	cmd[0] = pba >> 8;
 	cmd[1] = pba;
@@ -1416,7 +1420,7 @@ uint8_t LittleFS_QPINAND::addBBLUT(uint32_t block_address)
 	
    //FLEXSPI2_LUT44 = LUT0(CMD_SDR, PINS1, 0xA1) | LUT0(WRITE_SDR, PINS1, 1);  
    //flexspi2_ip_write(8, 0x00800000, cmd, 4);
-	
+	#endif	
 	wait(progtime);
   }
 	return 0;

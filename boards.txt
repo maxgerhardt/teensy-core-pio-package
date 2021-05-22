@@ -618,7 +618,7 @@ teensy36.build.command.objcopy=arm-none-eabi-objcopy
 teensy36.build.command.objdump=arm-none-eabi-objdump
 teensy36.build.command.linker=arm-none-eabi-gcc
 teensy36.build.command.size=arm-none-eabi-size
-teensy36.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib
+teensy36.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib -mno-unaligned-access
 teensy36.build.flags.dep=-MMD
 teensy36.build.flags.optimize=-Os
 teensy36.build.flags.cpu=-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16 -fsingle-precision-constant
@@ -827,7 +827,7 @@ teensy35.build.command.objcopy=arm-none-eabi-objcopy
 teensy35.build.command.objdump=arm-none-eabi-objdump
 teensy35.build.command.linker=arm-none-eabi-gcc
 teensy35.build.command.size=arm-none-eabi-size
-teensy35.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib
+teensy35.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib -mno-unaligned-access
 teensy35.build.flags.dep=-MMD
 teensy35.build.flags.optimize=-Os
 teensy35.build.flags.cpu=-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16 -fsingle-precision-constant
@@ -1026,7 +1026,7 @@ teensy31.build.command.objcopy=arm-none-eabi-objcopy
 teensy31.build.command.objdump=arm-none-eabi-objdump
 teensy31.build.command.linker=arm-none-eabi-gcc
 teensy31.build.command.size=arm-none-eabi-size
-teensy31.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib
+teensy31.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib -mno-unaligned-access
 teensy31.build.flags.dep=-MMD
 teensy31.build.flags.optimize=-Os
 teensy31.build.flags.cpu=-mthumb -mcpu=cortex-m4 -fsingle-precision-constant
@@ -1236,7 +1236,7 @@ teensy30.build.command.objcopy=arm-none-eabi-objcopy
 teensy30.build.command.objdump=arm-none-eabi-objdump
 teensy30.build.command.linker=arm-none-eabi-gcc
 teensy30.build.command.size=arm-none-eabi-size
-teensy30.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib
+teensy30.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib -mno-unaligned-access
 teensy30.build.flags.dep=-MMD
 teensy30.build.flags.optimize=-Os
 teensy30.build.flags.cpu=-mthumb -mcpu=cortex-m4 -fsingle-precision-constant
@@ -1396,7 +1396,7 @@ teensyLC.build.command.objcopy=arm-none-eabi-objcopy
 teensyLC.build.command.objdump=arm-none-eabi-objdump
 teensyLC.build.command.linker=arm-none-eabi-gcc
 teensyLC.build.command.size=arm-none-eabi-size
-teensyLC.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib
+teensyLC.build.flags.common=-g -Wall -ffunction-sections -fdata-sections -nostdlib -mno-unaligned-access
 teensyLC.build.flags.dep=-MMD
 teensyLC.build.flags.cpu=-mthumb -mcpu=cortex-m0plus -fsingle-precision-constant
 teensyLC.build.flags.defs=-D__MKL26Z64__ -DTEENSYDUINO=154
