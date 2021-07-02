@@ -1,6 +1,6 @@
 {
   "name": "framework-arduinoteensy",
-  "version": "1.154.0-beta9",
+  "version": "1.154.0-beta12",
   "description": "Arduino Wiring-based Framework for Teensy boards",
   "keywords": [
     "framework",
