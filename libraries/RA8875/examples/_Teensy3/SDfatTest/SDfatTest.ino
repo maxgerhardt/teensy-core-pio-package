@@ -1,17 +1,14 @@
 /*
 	Grab bmp image from an sd card.
  	It reads column by column and send each to RA8875
-	It uses the SDfat library of Bill Greyman
-	Official:https://github.com/greiman/SdFat
-	Beta (with TeensyLC support): https://github.com/greiman/SdFat-beta
-	Be sure to open SDfat/SdFatConfig.h and set ENABLE_SPI_TRANSACTION 0 to ENABLE_SPI_TRANSACTION 1 !!!
+	It uses the SD library, which uses SDfat library of Bill Greiman
 	Look inside the folder RA8875/examples/SDfatTest
 	there's a folder, copy the content in a formatted FAT32 SD card
 
  */
 #include <SPI.h>
 #include <RA8875.h>
-#include <SdFat.h>
+#include <SD.h>
 
 
 /*
@@ -23,16 +20,14 @@ You are using 4 wire SPI here, so:
  the rest of pin below:
  */
 
-#define SDCSPIN      6//for SD
-#define RA8875_CS 10 //any digital pin
-#define RA8875_RESET 9//any pin or nothing!
+#define SDCSPIN       6 //for SD
+#define RA8875_CS    10 //any digital pin
+#define RA8875_RESET  9 //any pin or nothing!
 
 #define BUFFPIXEL 30
 
 
 RA8875 tft = RA8875(RA8875_CS, RA8875_RESET); //Teensy3/arduino's
-SdFat SD;
-File     bmpFile;
 
 
 void setup()
@@ -44,7 +39,7 @@ void setup()
 
   //  begin display: Choose from: RA8875_480x272, RA8875_800x480, RA8875_800x480ALT, Adafruit_480x272, Adafruit_800x480
   tft.begin(RA8875_480x272);
-  if (!SD.begin(SDCSPIN, SPI_FULL_SPEED)) {
+  if (!SD.begin(SDCSPIN)) {
     Serial.println("SD failed!");
     return;
   }
@@ -61,16 +56,16 @@ void loop()
 
 void bmpDraw(const char *filename, uint16_t x, uint16_t y) {
 
-  
-  uint16_t      bmpWidth, bmpHeight;   // W+H in pixels
+  File     bmpFile;
+  uint16_t bmpWidth, bmpHeight;   // W+H in pixels
   uint8_t  bmpDepth;              // Bit depth (currently must be 24)
   uint32_t bmpImageoffset;        // Start of image data in file
   uint32_t rowSize;               // Not always = bmpWidth; may have padding
   uint8_t  sdbuffer[3 * BUFFPIXEL]; // pixel buffer (R+G+B per pixel)
-  uint16_t  buffidx = 0; 
+  uint16_t buffidx = 0;
   boolean  goodBmp = false;       // Set to true on valid header parse
   boolean  flip    = true;        // BMP is stored bottom-to-top
-  int16_t      w, h, row, col;
+  int16_t  w, h, row, col;
   uint32_t pos = 0, startTime = millis();
   buffidx = sizeof(sdbuffer);// Current position in sdbuffer
   if ((x >= tft.width()) || (y >= tft.height())) return;

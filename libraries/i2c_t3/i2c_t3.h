@@ -27,6 +27,8 @@
 
 #if defined(__AVR__)
 #error "Sorry, i2c_t3 only works on Teensy LC and 3.x boards.  Use Wire for Teensy 2.0."
+#elif defined(__IMXRT1062__)
+#error "Sorry, i2c_t3 only works on Teensy LC and 3.x.  Use Wire for Teensy 4.0, 4.1, MicroMod."
 #endif
 
 #if !defined(I2C_T3_H) && (defined(__MK20DX128__) || defined(__MK20DX256__) || defined(__MKL26Z64__) || \

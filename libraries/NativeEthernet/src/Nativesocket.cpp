@@ -92,10 +92,16 @@ makesocket:
     local_addr.sin_port = FNET_HTONS(port); //fnet_htons(UDP_PORT);
     local_addr.sin_addr.s_addr = INADDR_ANY; //fnet_htonl(INADDR_ANY);
     local_addr.sin_family = AF_INET;
-
     
-        fnet_socket_setopt(socket_ptr[s], SOL_SOCKET, SO_RCVBUF, &bufsize_option, sizeof(bufsize_option));
-        fnet_socket_setopt(socket_ptr[s], SOL_SOCKET, SO_SNDBUF, &bufsize_option, sizeof(bufsize_option));
+// bind the socket to the port
+    if (FNET_ERR == fnet_socket_bind(socket_ptr[s], (struct fnet_sockaddr*)(&local_addr), sizeof(local_addr))) {
+//        Serial.println("UDP/IP: Socket bind error.");
+        fnet_socket_close(socket_ptr[s]);
+        return socket_num;
+    }
+    
+    fnet_socket_setopt(socket_ptr[s], SOL_SOCKET, SO_RCVBUF, &bufsize_option, sizeof(bufsize_option));
+    fnet_socket_setopt(socket_ptr[s], SOL_SOCKET, SO_SNDBUF, &bufsize_option, sizeof(bufsize_option));
     if(protocol == SnMR::TCP){
         const struct fnet_linger    linger_option =
         {
@@ -106,13 +112,6 @@ makesocket:
         fnet_socket_setopt(socket_ptr[s], SOL_SOCKET, SO_LINGER, &linger_option, sizeof(linger_option));
 //        fnet_socket_setopt(socket_ptr[s], IPPROTO_TCP, TCP_MSS, &bufsize_option, sizeof(bufsize_option));
     }
-    
-    // bind the socket to the port
-        if (FNET_ERR == fnet_socket_bind(socket_ptr[s], (struct fnet_sockaddr*)(&local_addr), sizeof(local_addr))) {
-    //        Serial.println("UDP/IP: Socket bind error.");
-            fnet_socket_close(socket_ptr[s]);
-            return socket_num;
-        }
     
     EthernetServer::server_port[s] = 0;
     return s;
@@ -159,11 +158,11 @@ uint8_t EthernetClass::socketStatus(uint8_t s)
     fnet_socket_state_t state;
     fnet_size_t state_size = sizeof(state);
     if(fnet_socket_getopt(socket_ptr[s], SOL_SOCKET, SO_STATE, &state, &state_size) == FNET_ERR){
-//        int8_t error_handler = fnet_error_get();
-//        Serial.print("StateErr: ");
-//        Serial.send_now();
-//        Serial.println(error_handler);
-//        Serial.send_now();
+        int8_t error_handler = fnet_error_get();
+        Serial.print("StateErr: ");
+        Serial.send_now();
+        Serial.println(error_handler);
+        Serial.send_now();
     }
     switch (state) {
         case SS_CLOSED:
@@ -194,9 +193,10 @@ void EthernetClass::socketClose(uint8_t s)
     EthernetServer::_tls[s] = false;
 #endif
     fnet_socket_close(socket_ptr[s]);
-    while(Ethernet.socketStatus(s) != 1){
-        
-    }
+    
+//    while(Ethernet.socketStatus(s) != 1){
+//        
+//    }
     socket_ptr[s] = nullptr;
 }
 

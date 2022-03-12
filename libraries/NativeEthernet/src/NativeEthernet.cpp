@@ -36,7 +36,7 @@ DMAMEM uint8_t** EthernetClass::socket_buf_transmit;
 DMAMEM uint16_t* EthernetClass::socket_buf_len;
 DMAMEM uint16_t* EthernetClass::socket_port;
 DMAMEM uint8_t** EthernetClass::socket_addr;
-fnet_socket_t* EthernetClass::socket_ptr;
+volatile fnet_socket_t* EthernetClass::socket_ptr;
 
 void EthernetClass::setStackHeap(uint8_t* _stack_heap_ptr, size_t _stack_heap_size){
     if(stack_heap_ptr != NULL) return;

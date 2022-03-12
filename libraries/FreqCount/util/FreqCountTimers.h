@@ -364,12 +364,15 @@ volatile uint32_t count;
 static void timer_callback()
 {
   count = TMRx->CH[2].CNTR | TMRx->CH[3].HOLD << 16; // atomic
+  count_output = count - count_prev;
+  count_prev = count;
   count_ready = 1;
 }
 
 static inline uint16_t timer_init(uint32_t usec)
 {
 	itimer.begin(timer_callback, usec);  //timer correction
+	count_prev = 0;
 	return usec;
 }
 
@@ -380,6 +383,7 @@ static inline void timer_start(void)
 
 static inline void timer_shutdown(void)
 {
+	itimer.end();
 }
 
 

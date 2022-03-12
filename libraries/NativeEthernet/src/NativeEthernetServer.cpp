@@ -64,10 +64,10 @@ void EthernetServer::begin()
 		   }
 #endif
 		   if(service_descriptor == 0){
-			   Ethernet.socketDisconnect(sockindex);
+			   Ethernet.socketClose(sockindex);
 		   }
 	   } else {
-		   Ethernet.socketDisconnect(sockindex);
+		   Ethernet.socketClose(sockindex);
 	   }
    }
 }
@@ -81,35 +81,103 @@ EthernetClient EthernetServer::available()
 	for (uint8_t i=0; i < maxindex; i++) {
 		if (server_port[i] == _port) {
 			uint8_t stat = Ethernet.socketStatus(i);
+//		   static bool stat_toggle = false;
+//		   if(stat != 0x14){
+//			  Serial.print("ServerAvailStat: ");
+//			  Serial.println(stat, HEX);
+//			  Serial.send_now();
+//			  stat_toggle = false;
+//		   }
+//		   else if(!stat_toggle){
+//			  Serial.print("\nServerAvailStatListening: ");
+//			  Serial.println(stat, HEX);
+//			  Serial.send_now();
+//			  stat_toggle = true;
+//		   }
 			if (stat == SnSR::ESTABLISHED || stat == SnSR::CLOSE_WAIT) {
-                int ret = fnet_socket_recv(Ethernet.socket_ptr[i], Ethernet.socket_buf_receive[i], Ethernet.socket_size, MSG_PEEK);
-				if (ret > 0) {
-//                    int8_t error_handler = fnet_error_get();
-//                    if(ret == -1){
-//                        Serial.print("RecvErr: ");
-//                        Serial.send_now();
-//                        Serial.println(error_handler);
-//                        Serial.send_now();
-//                    }
-                    
-					sockindex = i;
-                    Ethernet.socket_buf_index[sockindex] = 0;
-				} else {
+			   fnet_ssize_t _pending;
+			   fnet_size_t _pending_size = sizeof(_pending);
+			   fnet_ssize_t ret = 0;
+			   elapsedMillis timeout = 0;
+			   
+			   fnet_socket_poll_t socket_poll;
+			   socket_poll.s = Ethernet.socket_ptr[i];
+			   socket_poll.events = (fnet_socket_event_t)FNET_SOCKET_EVENT_ALL; /* Connection attempt successful or failed */
+
+			   if(fnet_socket_poll(&socket_poll, 1))
+			   {
+				   if(socket_poll.events_occurred & FNET_SOCKET_EVENT_OUT || socket_poll.events_occurred & FNET_SOCKET_EVENT_IN) /* Connection successful */
+				   {
+             if(socket_poll.events_occurred & FNET_SOCKET_EVENT_ERR) /* Connection failed */
+             {
+               Serial.print("Socket Event Err: ");
+               fnet_ssize_t error_handler = fnet_error_get();
+               Serial.println(error_handler);
+               Serial.send_now();
+  //             break;
+             }
+					   if(socket_poll.events_occurred & (FNET_SOCKET_EVENT_OUT || FNET_SOCKET_EVENT_IN)) {
+//						   Serial.println("Socket Event Both");
+//						   break;
+             }
+             else if(socket_poll.events_occurred & FNET_SOCKET_EVENT_OUT){
+//               Serial.println("Socket Event Out");
+             }
+             else {
+//               Serial.println("Socket Event IN");
+             }
+              
+           }
+         }
+			   
+			   
+			   do{
+                   fnet_poll();
+                   if(fnet_socket_getopt(Ethernet.socket_ptr[i], SOL_SOCKET, SO_RCVNUM, &_pending, &_pending_size) == FNET_ERR){
+                       fnet_ssize_t error_handler = fnet_error_get();
+                       Serial.print("SRVAvailErr: ");
+                         Serial.send_now();
+                         Serial.println(error_handler);
+                         Serial.send_now();
+                         break;
+                   }
+                   ret = _pending;
+   //			    ret = fnet_socket_recv(Ethernet.socket_ptr[i], Ethernet.socket_buf_receive[i], Ethernet.socket_size, MSG_PEEK);
+			   } while(timeout < 10000 && ret == 0);
+			   
+//			   Serial.print("Recv: ");
+//			   Serial.println(_pending);
+			   if (ret > 0) {
+				  sockindex = i;
+				  Ethernet.socket_buf_index[sockindex] = 0;
+				  break;
+			   } else {
 					// remote host closed connection, our end still open
-					if (stat == SnSR::CLOSE_WAIT) {
-						Ethernet.socketDisconnect(i);
-						Ethernet.socketClose(i);
-						// status becomes LAST_ACK for short time
-					}
-				}
+				  if (stat == SnSR::CLOSE_WAIT) {
+					 server_port[i] = 0;
+					 Ethernet.socketClose(i);
+				  }
+				  else{
+					 Serial.println("No data available, closing socket");
+//					 Ethernet.socketDisconnect(i);
+					 server_port[i] = 0;
+					 Ethernet.socketClose(i);
+				  }
+			   }
 			} else if (stat == SnSR::LISTEN) {
-				listening = true;
+			   listening = true;
 			} else if (stat == SnSR::CLOSED) {
-				server_port[i] = 0;
+			   server_port[i] = 0;
+			   Ethernet.socketClose(i);
 			}
 		}
 	}
 	if (!listening) begin();
+//   if(sockindex != maxindex){
+//	  Serial.print("ServerAvailSock: ");
+//	  Serial.println(sockindex, HEX);
+//	  Serial.send_now();
+//   }
 	return EthernetClient(sockindex);
 }
 
@@ -221,17 +289,47 @@ void EthernetServer::poll(void* cookie){
                     if(server->_tls[i]){
                         fnet_tls_socket_t tls_socket = fnet_tls_socket(server->tls_desc, tmp);
                         if(tls_socket == FNET_NULL){
-                            Serial.println("Failed to create TLS socket");
-                            server->_tls[i] = false;
+                           Serial.println("Failed to create TLS socket");
+                           server->_tls[i] = false;
                         }
                         else{
-                            server->tls_socket_ptr[i] = tls_socket;
+                           server->tls_socket_ptr[i] = tls_socket;
                         }
                     }
 #endif
-                    fnet_socket_close(Ethernet.socket_ptr[i]);
-                    Ethernet.socket_ptr[i] = tmp;
-                    fnet_service_unregister(server->service_descriptor);
+                    //Copied from socketBegin to find an open socket without closing server socket
+                    uint8_t s, maxindex = Ethernet.socket_num;
+                    // look at all the hardware sockets, use any that are closed (unused)
+                    for (s=0; s < maxindex; s++) {
+                       if(Ethernet.socket_ptr[s] == nullptr){
+                           goto makesocket;
+                       }
+                    }
+                    // As a last resort, forcibly close any already closing
+                    for (s=0; s < maxindex; s++) {
+                       uint8_t stat = Ethernet.socketStatus(s);
+                       if (stat == SnSR::FIN_WAIT) goto closemakesocket;
+                       if (stat == SnSR::CLOSE_WAIT) goto closemakesocket;
+                    }
+                    fnet_socket_close(tmp);
+                    return;
+closemakesocket:
+				    Ethernet.socketClose(s);
+makesocket:
+//                    fnet_socket_close(Ethernet.socket_ptr[i]);
+                    Ethernet.socket_ptr[s] = tmp;
+                    //Don't unregister anymore since server is still listening
+//                    fnet_service_unregister(server->service_descriptor);
+//                    uint8_t stat = Ethernet.socketStatus(s);
+                    server->server_port[s] = server->server_port[i];
+//                    server->server_port[i] = 0;
+//                    Serial.print("Server: ");
+//                    Serial.println(i);
+//                    Serial.print("Socket Accepted: ");
+//                    Serial.println(s);
+//                    Serial.print("Socket Accepted Stat: ");
+//                    Serial.println(stat, HEX);
+//                    Serial.send_now();
                 }
             }
         }

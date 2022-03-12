@@ -422,6 +422,7 @@ static void _fnet_dns_poll( void *fnet_dns_if_p )
                     && (fnet_htons(header->qdcount) == 1) ) /* Must be only one question */
                 {
                     fnet_char_t         rr_name[FNET_DNS_NAME_SIZE];
+                    fnet_char_t         rr_cname[FNET_DNS_NAME_SIZE];
                     const fnet_uint8_t  *ptr = &dns_if->message[sizeof(fnet_dns_header_t)];
 
                     /* Skip Question section */
@@ -466,6 +467,12 @@ static void _fnet_dns_poll( void *fnet_dns_if_p )
                                         {
                                             break;
                                         }
+                                    }
+                                    else if ( (rr_header->type ==  FNET_HTONS(FNET_DNS_TYPE_CNAME)) &&
+                                            (rr_header->rr_class == FNET_HTONS(FNET_DNS_HEADER_CLASS_IN)))
+                                    {
+                                        _fnet_dns_get_rr_name(rr_cname, sizeof(rr_cname), ptr+sizeof(fnet_dns_rr_header_t), dns_if->message, received); /* Get RR name */
+                                        dns_if->host_name = rr_cname + 1 /* first length byte */;
                                     }
 
                                 }

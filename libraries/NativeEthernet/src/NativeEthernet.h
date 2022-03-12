@@ -88,7 +88,7 @@ private:
     static ssize_t socket_size;
     static uint8_t socket_num;
 public:
-    static fnet_socket_t* socket_ptr;
+    static volatile fnet_socket_t* socket_ptr;
     static DMAMEM uint8_t** socket_buf_receive;
     static DMAMEM uint16_t* socket_buf_index;
 	// Initialise the Ethernet shield to use the provided MAC address and
@@ -128,11 +128,12 @@ public:
 	friend class EthernetClient;
 	friend class EthernetServer;
 	friend class EthernetUDP;
+    static uint8_t socketStatus(uint8_t s);
 private:
 	// Opens a socket(TCP or UDP or IP_RAW mode)
 	static uint8_t socketBegin(uint8_t protocol, uint16_t port);
 	static uint8_t socketBeginMulticast(uint8_t protocol, IPAddress ip,uint16_t port);
-	static uint8_t socketStatus(uint8_t s);
+	
 	// Close socket
 	static void socketClose(uint8_t s);
 	// Establish TCP connection (Active connection)

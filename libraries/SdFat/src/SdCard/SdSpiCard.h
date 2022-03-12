@@ -66,7 +66,7 @@ class SdSpiCard {
   uint32_t sectorCount();
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
   // Use sectorCount(). cardSize() will be removed in the future.
-  uint32_t cardSize() __attribute__ ((deprecated)) {return sectorCount();}
+  uint32_t __attribute__((error("use sectorCount()"))) cardSize();
 #endif  // DOXYGEN_SHOULD_SKIP_THIS
   /** Erase a range of sectors.
    *
@@ -142,6 +142,18 @@ class SdSpiCard {
    * \return true for success or false for failure.
    */
   bool readSectors(uint32_t sector, uint8_t* dst, size_t ns);
+  /**
+   * Read multiple sectors with callback as each sector's data
+   *
+   * \param[in] sector Logical sector to be read.
+   * \param[in] ns Number of sectors to be read.
+   * \param[out] dst Pointer to the location that will receive the data.
+   * \param[in] callback Function to be called with each sector's data
+   * \param[in] context Pointer to be passed to the callback function
+   * \return true for success or false for failure.
+   */
+  bool readSectorsCallback(uint32_t sector, uint8_t* dst, size_t ns,
+   void (*callback)(uint32_t sector, uint8_t *buf, void *context), void *context);
   /**
    * Read a card's CID register. The CID contains card identification
    * information such as Manufacturer ID, Product name, Product serial
@@ -237,6 +249,17 @@ class SdSpiCard {
    * \return true for success or false for failure.
    */
   bool writeSectors(uint32_t sector, const uint8_t* src, size_t ns);
+  /**
+   * Write multiple sectors to SD card with callback to prep data.
+   *
+   * \param[in] sector Logical sector to be written.
+   * \param[in] ns Number of sectors to be written.
+   * \param[in] callback Function to be called for each sector's data
+   * \param[in] context to pass to callback function
+   * \return true for success or false for failure.
+   */
+  bool writeSectorsCallback(uint32_t sector, size_t ns,
+   const uint8_t * (*callback)(uint32_t sector, void *context), void *context);
   /** Write one data sector in a multiple sector write sequence.
    * \param[in] src Pointer to the location of the data to be written.
    * \return true for success or false for failure.
@@ -310,7 +333,7 @@ class SdSpiCard {
     return m_spiDriver.receive();
   }
   uint8_t spiReceive(uint8_t* buf, size_t n) {
-    return  m_spiDriver.receive(buf, n);
+    return m_spiDriver.receive(buf, n);
   }
   void spiSend(uint8_t data) {
     m_spiDriver.send(data);
@@ -336,7 +359,7 @@ class SdSpiCard {
     return m_spiDriverPtr->receive();
   }
   uint8_t spiReceive(uint8_t* buf, size_t n) {
-    return  m_spiDriverPtr->receive(buf, n);
+    return m_spiDriverPtr->receive(buf, n);
   }
   void spiSend(uint8_t data) {
     m_spiDriverPtr->send(data);

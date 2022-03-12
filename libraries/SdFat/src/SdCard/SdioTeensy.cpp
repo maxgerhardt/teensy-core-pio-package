@@ -27,6 +27,9 @@
 #include "SdCardInfo.h"
 #include "SdioCard.h"
 //==============================================================================
+/** Set zero to disable mod for non-blocking write. */
+#define ENABLE_TEENSY_SDIO_MOD 1
+//==============================================================================
 // limit of K66 due to errata KINETIS_K_0N65N.
 const uint32_t MAX_BLKCNT = 0XFFFF;
 //==============================================================================
@@ -331,7 +334,7 @@ static void gpioMux(uint8_t mode) {
 // add speed strength args?
 static void enableGPIO(bool enable) {
   const uint32_t CLOCK_MASK = IOMUXC_SW_PAD_CTL_PAD_PKE |
-#if defined(ARDUINO_TEENSY41)
+#if defined(__IMXRT1062__)
                               IOMUXC_SW_PAD_CTL_PAD_DSE(7) |
 #else  // defined(ARDUINO_TEENSY41)
                               IOMUXC_SW_PAD_CTL_PAD_DSE(4) |  ///// WHG

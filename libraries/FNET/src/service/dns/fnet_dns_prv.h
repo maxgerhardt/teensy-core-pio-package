@@ -42,6 +42,7 @@
 *************************************************************************/
 #define    FNET_DNS_TYPE_A      (0x0001U)    /**< @brief IPv4 address. */
 #define    FNET_DNS_TYPE_AAAA   (0x001CU)    /**< @brief IPv6 address. */
+#define    FNET_DNS_TYPE_CNAME  (0x0005U)    /**< @brief Canonical Name for Alias. */
 
 /************************************************************************
 *    DNS header [RFC1035, 4.1.1.]

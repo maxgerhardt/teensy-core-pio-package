@@ -26,6 +26,8 @@
 #include "../common/DebugMacros.h"
 #include "ExFatVolume.h"
 #include "../common/FsStructs.h"
+#include "../common/FsGetPartitionInfo.h"
+
 //------------------------------------------------------------------------------
 // return 0 if error, 1 if no space, else start cluster.
 uint32_t ExFatPartition::bitmapFind(uint32_t cluster, uint32_t count) {
@@ -164,7 +166,8 @@ int8_t ExFatPartition::dirSeek(DirPos_t* pos, uint32_t offset) {
   return 1;
 }
 //------------------------------------------------------------------------------
-uint8_t ExFatPartition::fatGet(uint32_t cluster, uint32_t* value) {
+// return -1 error, 0 EOC, 1 OK
+int8_t ExFatPartition::fatGet(uint32_t cluster, uint32_t* value) {
   uint8_t* cache;
   uint32_t next;
   uint32_t sector;
@@ -180,12 +183,8 @@ uint8_t ExFatPartition::fatGet(uint32_t cluster, uint32_t* value) {
     return -1;
   }
   next = getLe32(cache + ((cluster << 2) & m_sectorMask));
-
-  if (next == EXFAT_EOC) {
-    return 0;
-  }
   *value = next;
-  return 1;
+  return next == EXFAT_EOC ? 0 : 1;
 }
 //------------------------------------------------------------------------------
 bool ExFatPartition::fatPut(uint32_t cluster, uint32_t value) {
@@ -222,7 +221,7 @@ bool ExFatPartition::freeChain(uint32_t cluster) {
       DBG_FAIL_MACRO;
       goto fail;
     }
-    if ((cluster + 1) != next || status == 0) {
+    if (status == 0 || (cluster + 1) != next) {
       if (!bitmapModify(start, cluster - start + 1, 0)) {
         DBG_FAIL_MACRO;
         goto fail;
@@ -271,31 +270,48 @@ bool ExFatPartition::init(BlockDevice* dev, uint8_t part) {
   uint32_t volStart = 0;
   uint8_t* cache;
   pbs_t* pbs;
-  BpbExFat_t* bpb;
+  #if SUPPORT_GPT_AND_EXTENDED_PATITIONS 
+  uint32_t firstLBA;
+  #else
   MbrSector_t* mbr;
   MbrPart_t* mp;
+  #endif
+  BpbExFat_t* bpb;
 
   m_fatType = 0;
   m_blockDev = dev;
   cacheInit(m_blockDev);
+
+
+  #if SUPPORT_GPT_AND_EXTENDED_PATITIONS 
+  cache = cacheClear(); // get buffer to use. 
+  FsGetPartitionInfo::voltype_t vt = FsGetPartitionInfo::getPartitionInfo(m_blockDev, part,cache, &firstLBA);
+  if ((vt == FsGetPartitionInfo::INVALID_VOL) || (vt == FsGetPartitionInfo::OTHER_VOL)) {
+    DBG_FAIL_MACRO;
+    goto fail;    
+  }
+  volStart = firstLBA;
+
+  #else
+  // Simple 
   cache = dataCacheGet(0, FsCache::CACHE_FOR_READ);
-  if (part > 4 || !cache) {
+  if (part < 1 || part > 4 || !cache) {
     DBG_FAIL_MACRO;
     goto fail;
   }
-  if (part >= 1) {
-    mbr = reinterpret_cast<MbrSector_t*>(cache);
-    mp = &mbr->part[part - 1];
-    if ((mp->boot != 0 && mp->boot != 0X80) || mp->type == 0) {
-      DBG_FAIL_MACRO;
-      goto fail;
-    }
-    volStart = getLe32(mp->relativeSectors);
-    cache = dataCacheGet(volStart, FsCache::CACHE_FOR_READ);
-    if (!cache) {
-      DBG_FAIL_MACRO;
-      goto fail;
-    }
+  mbr = reinterpret_cast<MbrSector_t*>(cache);
+  mp = &mbr->part[part - 1];
+  if ((mp->boot != 0 && mp->boot != 0X80) || mp->type == 0) {
+    DBG_FAIL_MACRO;
+    goto fail;
+  }
+  volStart = getLe32(mp->relativeSectors);
+  #endif
+
+  cache = dataCacheGet(volStart, FsCache::CACHE_FOR_READ);
+  if (!cache) {
+    DBG_FAIL_MACRO;
+    goto fail;
   }
   pbs = reinterpret_cast<pbs_t*>(cache);
   if (strncmp(pbs->oemName, "EXFAT", 5)) {

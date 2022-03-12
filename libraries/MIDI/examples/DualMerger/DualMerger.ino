@@ -12,10 +12,13 @@
 #elif defined(ARDUINO_SAMD_ZERO)
     MIDI_CREATE_INSTANCE(Serial_, SerialUSB,  midiA);
     MIDI_CREATE_INSTANCE(HardwareSerial, Serial1,    midiB);
-#elif defined(USBCON) || defined(__MK20DX128__) || defined(__MK20DX256__) || defined(__MKL26Z64__)
+#elif defined(TEENSYDUINO) && defined(__arm__)
+    MIDI_CREATE_INSTANCE(HardwareSerial, Serial1,    midiA);
+    MIDI_CREATE_INSTANCE(HardwareSerial, Serial2,    midiB);
+#elif defined(USBCON)
     #include <SoftwareSerial.h>
     SoftwareSerial softSerial(2,3);
-    MIDI_CREATE_INSTANCE(HardwareSerial, Serial1,     midiA);
+    MIDI_CREATE_INSTANCE(HardwareSerial, Serial1,    midiA);
     MIDI_CREATE_INSTANCE(SoftwareSerial, softSerial, midiB);
 #else
     #include <SoftwareSerial.h>

@@ -62,7 +62,7 @@ struct endpoint_struct {
 uint8_t experimental_buffer[1152] __attribute__ ((section(".dmabuffers"), aligned(64)));
 #endif
 
-endpoint_t endpoint_queue_head[(NUM_ENDPOINTS+1)*2] __attribute__ ((used, aligned(4096)));
+endpoint_t endpoint_queue_head[(NUM_ENDPOINTS+1)*2] __attribute__ ((used, aligned(4096), section(".endpoint_queue") ));
 
 transfer_t endpoint0_transfer_data __attribute__ ((used, aligned(32)));
 transfer_t endpoint0_transfer_ack  __attribute__ ((used, aligned(32)));
@@ -212,6 +212,25 @@ FLASHMEM void usb_init(void)
 }
 
 
+FLASHMEM void _reboot_Teensyduino_(void)
+{
+	if (!(HW_OCOTP_CFG5 & 0x02)) {
+		asm("bkpt #251"); // run bootloader
+	} else {
+		__disable_irq(); // secure mode NXP ROM reboot
+		USB1_USBCMD = 0;
+		IOMUXC_GPR_GPR16 = 0x00200003;
+		// TODO: wipe all RAM for security
+		__asm__ volatile("mov sp, %0" : : "r" (0x20201000) : );
+		__asm__ volatile("dsb":::"memory");
+		volatile uint32_t * const p = (uint32_t *)0x20208000;
+		*p = 0xEB120000;
+		((void (*)(volatile void *))(*(uint32_t *)(*(uint32_t *)0x0020001C + 8)))(p);
+	}
+	__builtin_unreachable();
+}
+
+
 void usb_isr(void)
 {
 	//printf("*");
@@ -338,7 +357,7 @@ void usb_isr(void)
 		if (usb_reboot_timer) {
 			if (--usb_reboot_timer == 0) {
 				usb_stop_sof_interrupts(NUM_INTERFACE);
-				asm("bkpt #251"); // run bootloader
+				_reboot_Teensyduino_();
 			}
 		}
 		#ifdef MIDI_INTERFACE
@@ -898,6 +917,10 @@ static void schedule_transfer(endpoint_t *endpoint, uint32_t epmask, transfer_t 
 		//USB1_USBCMD &= ~USB_USBCMD_ATDTW;
 		if (status & epmask) goto end;
 		//ret |= 0x02;
+		endpoint->next = (uint32_t)transfer;
+		endpoint->status = 0;
+		USB1_ENDPTPRIME |= epmask;
+		goto end;
 	}
 	//digitalWriteFast(4, HIGH);
 	endpoint->next = (uint32_t)transfer;

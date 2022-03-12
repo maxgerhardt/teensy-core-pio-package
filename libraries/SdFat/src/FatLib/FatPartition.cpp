@@ -26,7 +26,9 @@
 #define DBG_FILE "FatPartition.cpp"
 #include "../common/DebugMacros.h"
 #include "../common/FsStructs.h"
+#include "../common/FsGetPartitionInfo.h"
 #include "FatPartition.h"
+
 //------------------------------------------------------------------------------
 bool FatPartition::allocateCluster(uint32_t current, uint32_t* next) {
   uint32_t find;
@@ -326,6 +328,39 @@ bool FatPartition::freeChain(uint32_t cluster) {
  fail:
   return false;
 }
+
+// Structure to use for doing free cluster count using callbacks
+struct FreeClusterCountStruct {
+  uint32_t clusters_to_do;
+  uint32_t free_count;
+};
+
+//------------------------------------------------------------------------------
+void FatPartition::freeClusterCount_cb_fat16(uint32_t sector, uint8_t *buf, void *context) {
+   struct FreeClusterCountStruct *state = (struct FreeClusterCountStruct *)context;
+  uint16_t *p = (uint16_t *)buf;
+  unsigned int n = state->clusters_to_do;
+  if (n > 256) n = 256;
+  uint16_t *e = p + n;
+  while (p < e) {
+    if (*p++ == 0) state->free_count++;
+  }
+  state->clusters_to_do -= n;
+}
+
+//------------------------------------------------------------------------------
+void FatPartition::freeClusterCount_cb_fat32(uint32_t sector, uint8_t *buf, void *context) {
+  struct FreeClusterCountStruct *state = (struct FreeClusterCountStruct *)context;
+  uint32_t *p = (uint32_t *)buf;
+  unsigned int n = state->clusters_to_do;
+  if (n > 128) n = 128;
+  uint32_t *e = p + n;
+  while (p < e) {
+    if (*p++ == 0) state->free_count++;
+  }
+  state->clusters_to_do -= n;
+}
+
 //------------------------------------------------------------------------------
 int32_t FatPartition::freeClusterCount() {
 #if MAINTAIN_FREE_CLUSTER_COUNT
@@ -333,70 +368,68 @@ int32_t FatPartition::freeClusterCount() {
     return m_freeClusterCount;
   }
 #endif  // MAINTAIN_FREE_CLUSTER_COUNT
-  uint32_t free = 0;
-  uint32_t sector;
-  uint32_t todo = m_lastCluster + 1;
-  uint16_t n;
-
-  if (FAT12_SUPPORT && fatType() == 12) {
+ if (FAT12_SUPPORT && fatType() == 12) {
+    uint32_t free = 0;
+    uint32_t todo = m_lastCluster + 1;
     for (unsigned i = 2; i < todo; i++) {
       uint32_t c;
       int8_t fg = fatGet(i, &c);
       if (fg < 0) {
         DBG_FAIL_MACRO;
-        goto fail;
+        return -1;
       }
       if (fg && c == 0) {
         free++;
       }
     }
-  } else if (fatType() == 16 || fatType() == 32) {
-    sector = m_fatStartSector;
-    while (todo) {
-      cache_t* pc = cacheFetchFat(sector++, FsCache::CACHE_FOR_READ);
-      if (!pc) {
-        DBG_FAIL_MACRO;
-        goto fail;
-      }
-      n =  fatType() == 16 ? m_bytesPerSector/2 : m_bytesPerSector/4;
-      if (todo < n) {
-        n = todo;
-      }
-      if (fatType() == 16) {
-        for (uint16_t i = 0; i < n; i++) {
-          if (pc->fat16[i] == 0) {
-            free++;
-          }
-        }
-      } else {
-        for (uint16_t i = 0; i < n; i++) {
-          if (pc->fat32[i] == 0) {
-            free++;
-          }
-        }
-      }
-      todo -= n;
-    }
-  } else {
-    // invalid FAT type
-    DBG_FAIL_MACRO;
-    goto fail;
+    return free;
   }
-  setFreeClusterCount(free);
-  return free;
 
- fail:
-  return -1;
+  struct FreeClusterCountStruct state;
+
+  state.free_count = 0;
+  state.clusters_to_do = m_lastCluster + 1;
+
+  uint32_t num_sectors;
+
+  //num_sectors = SD.sdfs.m_fVol->sectorsPerFat(); // edit FsVolume.h for public
+  //Serial.printf("  num_sectors = %u\n", num_sectors);
+
+  num_sectors = m_sectorsPerFat;
+  //Serial.printf("  num_sectors = %u\n", num_sectors);
+#if USE_SEPARATE_FAT_CACHE
+  uint8_t *buf = m_fatCache.clear();  // will clear out anything and return buffer 
+#else  
+  uint8_t *buf = m_cache.clear();  // will clear out anything and return buffer 
+#endif  // USE_SEPARATE_FAT_CACHE
+  if (buf == nullptr) return -1;
+  if (fatType() == FAT_TYPE_FAT32) {
+    if (!m_blockDev->readSectorsCallback(m_fatStartSector, buf, num_sectors, freeClusterCount_cb_fat32, &state)) return -1;
+  } else {
+    if (!m_blockDev->readSectorsCallback(m_fatStartSector, buf, num_sectors, freeClusterCount_cb_fat16, &state)) return -1;
+  }
+
+  setFreeClusterCount(state.free_count);
+  return state.free_count;
 }
+
+
 //------------------------------------------------------------------------------
 bool FatPartition::init(BlockDevice* dev, uint8_t part) {
+//  Serial.printf(" FatPartition::init(%x %u)\n", (uint32_t)dev, part);
   uint32_t clusterCount;
   uint32_t totalSectors;
   uint32_t volumeStartSector = 0;
   m_blockDev = dev;
   pbs_t* pbs;
   BpbFat32_t* bpb;
+  #if SUPPORT_GPT_AND_EXTENDED_PATITIONS 
+  uint32_t firstLBA;
+  #else
   MbrSector_t* mbr;
+  MbrPart_t* mp;
+  #endif
+
   uint8_t tmp;
   m_fatType = 0;
   m_allocSearchStart = 1;
@@ -404,23 +437,29 @@ bool FatPartition::init(BlockDevice* dev, uint8_t part) {
 #if USE_SEPARATE_FAT_CACHE
   m_fatCache.init(dev);
 #endif  // USE_SEPARATE_FAT_CACHE
-  // if part == 0 assume super floppy with FAT boot sector in sector zero
-  // if part > 0 assume mbr volume with partition table
-  if (part) {
-    if (part > 4) {
-      DBG_FAIL_MACRO;
-      goto fail;
-    }
-    mbr = reinterpret_cast<MbrSector_t*>
-          (cacheFetchData(0, FsCache::CACHE_FOR_READ));
-    MbrPart_t* mp = mbr->part + part - 1;
 
-    if (!mbr || mp->type == 0 || (mp->boot != 0 && mp->boot != 0X80)) {
-      DBG_FAIL_MACRO;
-      goto fail;
-    }
-    volumeStartSector = getLe32(mp->relativeSectors);
+  #if SUPPORT_GPT_AND_EXTENDED_PATITIONS 
+  FsGetPartitionInfo::voltype_t vt = FsGetPartitionInfo::getPartitionInfo(m_blockDev, part, cacheClear(), &firstLBA);
+  if ((vt == FsGetPartitionInfo::INVALID_VOL) || (vt == FsGetPartitionInfo::OTHER_VOL)) {
+    DBG_FAIL_MACRO;
+    goto fail;    
   }
+  volumeStartSector = firstLBA;
+  #else
+  if (part < 1 || part > 4) {
+    DBG_FAIL_MACRO;
+    goto fail;
+  }
+  mbr = reinterpret_cast<MbrSector_t*>(cacheFetchData(0, FsCache::CACHE_FOR_READ));
+  mp = mbr->part + part - 1;
+
+  if (!mbr || mp->type == 0 || (mp->boot != 0 && mp->boot != 0X80)) {
+    DBG_FAIL_MACRO;
+    goto fail;
+  }
+  volumeStartSector = getLe32(mp->relativeSectors);
+  #endif
+
   pbs = reinterpret_cast<pbs_t*>
         (cacheFetchData(volumeStartSector, FsCache::CACHE_FOR_READ));
   bpb = reinterpret_cast<BpbFat32_t*>(pbs->bpb);

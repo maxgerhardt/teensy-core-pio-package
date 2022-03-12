@@ -1,4 +1,7 @@
-# http://www.pjrc.com/teensy/teensyduino.html
+# https://www.pjrc.com/teensy/td_download.html
+# https://arduino.github.io/arduino-cli/latest/platform-specification/
+# https://arduino.github.io/arduino-cli/0.19/platform-specification/
+
 name=Teensyduino
 version=1.8.5
 rewriting=disabled
@@ -36,7 +39,7 @@ recipe.ar.pattern="{compiler.path}{build.toolchain}{build.command.ar}" rcs "{arc
 ## Link
 recipe.c.combine.pattern="{compiler.path}{build.toolchain}{build.command.linker}" {build.flags.optimize} {build.flags.ld} {build.flags.ldspecs} {build.flags.cpu} -o "{build.path}/{build.project_name}.elf" {object_files} "{build.path}/{archive_file}" "-L{build.path}" {build.flags.libs}
 
-## Patch ELF - TODO: not supported by Arduino 1.6.6 builder
+## Patch ELF - TODO: not supported by modern Arduino...  :(
 recipe.elfpatch.pattern="{compiler.path}/hardware/tools/{build.elfpatch}" -mmcu={build.mcu} "{build.path}/{build.project_name}.elf" "{sketch_path}/disk"
 
 ## Create eeprom
@@ -45,11 +48,20 @@ recipe.objcopy.eep.pattern="{compiler.path}{build.toolchain}{build.command.objco
 ## Create hex
 recipe.objcopy.hex.pattern="{compiler.path}{build.toolchain}{build.command.objcopy}" {compiler.elf2hex.flags} "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.hex"
 
+## EHEX file - for Teensy 4.x secure mode
+recipe.hooks.objcopy.postobjcopy.1.pattern="{compiler.path}teensy_secure" encrypthex {build.board} "{build.path}/{build.project_name}.hex"
+
+
 ## Post Build - inform Teensy Loader of new file
-recipe.hooks.postbuild.1.pattern="{compiler.path}stdout_redirect" "{build.path}/{build.project_name}.lst" "{compiler.path}{build.toolchain}{build.command.objdump}" -d -S -C "{build.path}/{build.project_name}.elf"
+recipe.hooks.postbuild.1.pattern="{compiler.path}teensy_post_compile" "-file={build.project_name}" "-path={build.path}" "-tools={compiler.path}" "-board={build.board}"
 recipe.hooks.postbuild.2.pattern="{compiler.path}stdout_redirect" "{build.path}/{build.project_name}.sym" "{compiler.path}{build.toolchain}{build.command.objdump}" -t -C "{build.path}/{build.project_name}.elf"
-recipe.hooks.postbuild.3.pattern="{compiler.path}teensy_post_compile" "-file={build.project_name}" "-path={build.path}" "-tools={compiler.path}" "-board={build.board}"
-recipe.hooks.postbuild.4.pattern="{compiler.path}teensy_size" "{build.path}/{build.project_name}.elf"
+recipe.hooks.postbuild.3.pattern="{compiler.path}teensy_size" "{build.path}/{build.project_name}.elf"
+#
+# objdump to create .lst file is VERY SLOW for huge files
+# https://forum.pjrc.com/threads/68121?p=288306&viewfull=1#post288306
+#
+# recipe.hooks.postbuild.4.pattern="{compiler.path}stdout_redirect" "{build.path}/{build.project_name}.lst" "{compiler.path}{build.toolchain}{build.command.objdump}" -d -S -C "{build.path}/{build.project_name}.elf"
+
 
 ## Compute size
 recipe.size.pattern="{compiler.path}{build.toolchain}{build.command.size}" -A "{build.path}/{build.project_name}.elf"
@@ -72,6 +84,7 @@ tools.teensyloader.upload.pattern="{cmd.path}/teensy_post_compile" "-file={build
 ## Export hex
 recipe.output.tmp_file={build.project_name}.hex
 recipe.output.save_file={build.project_name}.{build.board}.hex
+recipe.hooks.savehex.postsavehex.1.pattern="{compiler.path}teensy_secure" encrypthex {build.board} "{sketch_path}/{build.project_name}.{build.board}.hex"
 
 # TODO: missing patch in 1.6.6...
 recipe.output.tmp_file2={build.project_name}.elf
@@ -79,4 +92,4 @@ recipe.output.save_file2={build.project_name}.elf
 
 
 # documentation on this file's format
-# https://github.com/arduino/Arduino/wiki/Arduino-IDE-1.5-3rd-party-Hardware-specification
+# https://arduino.github.io/arduino-cli/latest/platform-specification/

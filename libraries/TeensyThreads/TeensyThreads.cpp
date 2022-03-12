@@ -24,6 +24,7 @@
  */
 #include "TeensyThreads.h"
 #include <Arduino.h>
+#include <string.h>
 
 #ifndef __IMXRT1062__
 
@@ -54,6 +55,8 @@ extern "C" {
     threads.getNextThread();
   }
 }
+
+const int overflow_stack_size = 8;
 
 extern "C" void stack_overflow_default_isr() { 
   currentThread->flags = Threads::ENDED;
@@ -175,7 +178,7 @@ bool gtp1_init(unsigned int microseconds)
 
   switch (gpt_number) {
     case 1:
-      CCM_CCGR1 |= CCM_CCGR1_GPT(CCM_CCGR_ON) ;  // enable GPT1 module
+      CCM_CCGR1 |= CCM_CCGR1_GPT1_BUS(CCM_CCGR_ON) ;  // enable GPT1 module
       GPT1_CR = 0;                   // disable timer
       GPT1_PR = 23;                  // prescale: divide by 24 so 1 tick = 1 microsecond at 24MHz
       GPT1_OCR1 = microseconds - 1;  // compare value
@@ -184,7 +187,7 @@ bool gtp1_init(unsigned int microseconds)
       GPT1_CR = GPT_CR_EN | GPT_CR_CLKSRC(1) ; // set to peripheral clock (24MHz)
       break;
     case 2:
-      CCM_CCGR1 |= CCM_CCGR1_GPT(CCM_CCGR_ON) ;  // enable GPT1 module
+      CCM_CCGR1 |= CCM_CCGR1_GPT1_BUS(CCM_CCGR_ON) ;  // enable GPT1 module
       GPT2_CR = 0;                   // disable timer
       GPT2_PR = 23;                  // prescale: divide by 24 so 1 tick = 1 microsecond at 24MHz
       GPT2_OCR1 = microseconds - 1;  // compare value
@@ -201,9 +204,47 @@ bool gtp1_init(unsigned int microseconds)
 
 #endif
 
+/*************************************************/
+/**\name UTILITIES FUNCTIONS                     */
+/*************************************************/
+/**
+ * \brief Convert thead state to printable string
+ */
+char * _util_state_2_string(int state){
+    static char _state[Threads::UTIL_STATE_NAME_DESCRIPTION_LENGTH];
+    memset(_state, 0, sizeof(_state));
+
+    switch (state)
+    {
+    case 0:
+        sprintf(_state, "EMPTY");
+        break;
+    case 1:
+        sprintf(_state, "RUNNING");
+        break;
+    case 2:
+        sprintf(_state, "ENDED");
+        break;
+    case 3:
+        sprintf(_state, "ENDING");
+        break;
+    case 4:
+        sprintf(_state, "SUSPENDED");
+        break;
+    default:
+        sprintf(_state, "%d", state);
+        break;
+    }
+    
+    return _state;
+}
+
+/*************************************************/
+/**\name CLASS THREAD                            */
+/*************************************************/
 Threads::Threads() : current_thread(0), thread_count(0), thread_error(0) {
   // initilize thread slots to empty
-  for(int i=0; i<MAX_THREADS; i++) {
+  for(int i=1; i<MAX_THREADS; i++) {
     threadp[i] = NULL;
   }
   // fill thread 0, which is always running
@@ -220,6 +261,7 @@ Threads::Threads() : current_thread(0), thread_count(0), thread_error(0) {
   threadp[0]->ticks = DEFAULT_TICKS;
   threadp[0]->stack = (uint8_t*)&_estack - DEFAULT_STACK0_SIZE;
   threadp[0]->stack_size = DEFAULT_STACK0_SIZE;
+  setStackMarker(threadp[0]->stack);
 
 #ifdef __IMXRT1062__
 
@@ -298,7 +340,7 @@ void Threads::getNextThread() {
 
   // did we overflow the stack (don't check thread 0)?
   // allow an extra 8 bytes for a call to the ISR and one additional call or variable
-  if (current_thread && ((uint8_t*)currentThread->sp - currentThread->stack <= 8)) {
+  if (current_thread && ((uint8_t*)currentThread->sp - currentThread->stack <= overflow_stack_size)) {
     stack_overflow_isr();
   }
 
@@ -429,11 +471,41 @@ void Threads::del_process(void)
 }
 
 /*
+ * Set a marker at memory so we can detect memory overruns
+ */
+
+const uint32_t thread_marker = 0xDEADDEAD;
+
+void Threads::setStackMarker(void *stack)
+{
+  uint32_t *m = (uint32_t*)stack;
+  *m = thread_marker;
+}
+
+/*
+ * Users call this function to see if stack has been corrupted
+ */
+int Threads::testStackMarkers(int *threadid)
+{
+  for (int i=0; i < MAX_THREADS; i++) {
+    if (threadp[i] == NULL) continue;
+    if (threadp[i]->flags == RUNNING) {
+      uint32_t *m = (uint32_t*)threadp[i]->stack;
+      if (*m != thread_marker) {
+        if (threadid) *threadid = i;
+        return -1;
+      }
+    }
+  }
+  return 0;
+}
+
+/*
  * Initializes a thread's stack. Called when thread is created
  */
 void *Threads::loadstack(ThreadFunction p, void * arg, void *stackaddr, int stack_size)
 {
-  interrupt_stack_t * process_frame = (interrupt_stack_t *)((uint8_t*)stackaddr + stack_size - sizeof(interrupt_stack_t) - 8);
+  interrupt_stack_t * process_frame = (interrupt_stack_t *)((uint8_t*)stackaddr + stack_size - sizeof(interrupt_stack_t) - overflow_stack_size);
   process_frame->r0 = (uint32_t)arg;
   process_frame->r1 = 0;
   process_frame->r2 = 0;
@@ -484,6 +556,7 @@ int Threads::addThread(ThreadFunction p, void * arg, int stack_size, void *stack
       else {
         tp->my_stack = 0;
       }
+      setStackMarker(stack);
       tp->stack = (uint8_t*)stack;
       tp->stack_size = stack_size;
       void *psp = loadstack(p, arg, tp->stack, tp->stack_size);
@@ -579,6 +652,90 @@ void Threads::delay(int millisecond) {
   while((int)millis() - mx < millisecond) yield();
 }
 
+/*
+ * Experimental code for putting CPU into sleep mode during delays
+ */
+
+void Threads::setSleepCallback(ThreadFunctionSleep callback) 
+{
+  enter_sleep_callback = callback;
+}
+
+void Threads::delay_us(int microsecond){
+  int mx = micros();
+  while ((int)micros() - mx < microsecond) yield();
+}
+
+void Threads::idle() {
+	volatile bool needs_run[thread_count];
+	volatile int i, j;
+	volatile int task_id_ends;
+
+  if (enter_sleep_callback==NULL) return;
+
+	__disable_irq();
+	task_id_ends = -1;
+	//get lowest sleep interval from sleeping tasks into task_id_ends
+	for (i = 0; i < thread_count; i++) {
+		//sort by ending time first
+		for (j = i + 1; j < thread_count; ++j) {
+      if (! threadp[i]) continue;
+			if (threadp[i]->sleep_time_till_end_tick > threadp[j]->sleep_time_till_end_tick) {
+				//if end time soonest
+				if (getState(i+1) == SUSPENDED) {
+					task_id_ends = j; //store next task
+				}
+			}
+		}
+	}
+  if (task_id_ends==-1) return;
+
+	//set the sleeping time to substractor
+	int subtractor = threadp[task_id_ends]->sleep_time_till_end_tick;
+	
+	if (subtractor > 0) {
+		//if sleep is needed
+		volatile int time_spent_asleep = enter_sleep_callback(subtractor);
+		//store new data based on time spent asleep
+		for (i = 0; i < thread_count; i++) {
+      if (! threadp[i]) continue;
+      needs_run[i] = 0;
+      if (getState(i+1) == SUSPENDED) {
+				threadp[i]->sleep_time_till_end_tick -= time_spent_asleep; //substract sleep time
+				//time to run?
+				if (threadp[i]->sleep_time_till_end_tick <= 0) {
+					needs_run[i] = 1;
+				} else {
+					needs_run[i] = 0;
+				}
+			}
+		}
+		//for each thread when slept, resume if needed
+		for (i = 0; i < thread_count; i++) {
+      if (! threadp[i]) continue;
+			if (needs_run[i]) {
+				setState(i+1, RUNNING);
+				threadp[i]->sleep_time_till_end_tick = 60000;
+			}
+		}
+	}
+	__enable_irq();
+	yield();
+}
+
+void Threads::sleep(int ms) {
+	int i = id();
+	if (getState(i) == RUNNING) {
+		__disable_irq();
+		threadp[i-1]->sleep_time_till_end_tick = ms;
+		setState(i, SUSPENDED);
+		__enable_irq();
+		yield();
+	}
+}
+
+/* End of experimental code */
+
 int Threads::id() {
   volatile int ret;
   __disable_irq();
@@ -593,6 +750,35 @@ int Threads::getStackUsed(int id) {
 
 int Threads::getStackRemaining(int id) {
   return (uint8_t*)threadp[id]->sp - threadp[id]->stack;
+}
+
+char *Threads::threadsInfo(void)
+{
+  static char _buffer[Threads::UTIL_TRHEADS_BUFFER_LENGTH];
+  uint _buffer_cursor = 0;
+  _buffer_cursor = sprintf(_buffer, "_____\n");
+  for (int each_thread = 0; each_thread < thread_count; each_thread++)
+  {
+    if (threadp[each_thread] != NULL)
+    {
+      _buffer_cursor += sprintf(_buffer + _buffer_cursor, "%d:", each_thread);
+      _buffer_cursor += sprintf(_buffer + _buffer_cursor, "Stack size:%d|",
+                                threadp[each_thread]->stack_size);
+      _buffer_cursor += sprintf(_buffer + _buffer_cursor, "Used:%d|Remains:%d|",
+                                getStackUsed(each_thread),
+                                getStackRemaining(each_thread));
+      char *_thread_state = _util_state_2_string(threadp[each_thread]->flags);
+      _buffer_cursor += sprintf(_buffer + _buffer_cursor, "State:%s|",
+                                _thread_state);
+#ifdef DEBUG
+      _buffer_cursor += sprintf(_buffer + _buffer_cursor, "cycles:%lu\n",
+                                threadp[each_thread]->cyclesAccum);
+#else
+      _buffer_cursor += sprintf(_buffer + _buffer_cursor, "\n");
+#endif
+    }
+  }
+  return _buffer;
 }
 
 #ifdef DEBUG
