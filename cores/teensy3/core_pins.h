@@ -2409,7 +2409,11 @@ static inline void delayMicroseconds(uint32_t usec)
 		"nop"					"\n\t"
 #endif
 #ifdef KINETISL
+		#ifdef __clang__
 		"subs    %0, #1"				"\n"
+		#else 
+		"sub    %0, #1"				"\n"
+		#endif
 		"bne    L_%=_delayMicroseconds"		"\n"
 		: "+l" (n) :
 #else
