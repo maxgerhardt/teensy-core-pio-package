@@ -2404,16 +2404,16 @@ static inline void delayMicroseconds(uint32_t usec)
     // changed because a delay of 1 micro Sec @ 2MHz will be 0
 	if (n == 0) return;
 	__asm__ volatile(
-		"L_%=_delayMicroseconds:"		"\n\t"
+		"L_%=_delayMicroseconds:"		"\n"
 #if F_CPU < 24000000
 		"nop"					"\n\t"
 #endif
 #ifdef KINETISL
-		"sub    %0, #1"				"\n\t"
+		"subs    %0, #1"				"\n"
 		"bne    L_%=_delayMicroseconds"		"\n"
 		: "+l" (n) :
 #else
-		"subs   %0, #1"				"\n\t"
+		"subs   %0, #1"				"\n"
 		"bne    L_%=_delayMicroseconds"		"\n"
 		: "+r" (n) :
 #endif
