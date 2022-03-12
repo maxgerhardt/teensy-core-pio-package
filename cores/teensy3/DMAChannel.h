@@ -652,12 +652,20 @@ public:
 		CFG->DCR = (CFG->DCR & 0xF08E0FFF) | DMA_DCR_SSIZE(2);
 	}
 	void source(volatile const signed int &p) { source(*(volatile const uint32_t *)&p); }
+	#ifndef __clang__
 	void source(volatile const unsigned int &p) { source(*(volatile const uint32_t *)&p); }
 	void source(volatile const signed long &p) { source(*(volatile const uint32_t *)&p); }
 	void source(volatile const unsigned long &p) {
 		CFG->SAR = &p;
 		CFG->DCR = (CFG->DCR & 0xF08E0FFF) | DMA_DCR_SSIZE(0);
 	}
+	#else 
+	void source(volatile const signed long &p) { source(*(volatile const uint32_t *)&p); }
+	void source(volatile const unsigned int &p) {
+		CFG->SAR = &p;
+		CFG->DCR = (CFG->DCR & 0xF08E0FFF) | DMA_DCR_SSIZE(0);
+	}
+	#endif
 
 	// Use a buffer (array of data) as the data source.  Typically a
 	// buffer for transmitting data is used.
@@ -679,6 +687,7 @@ public:
 	}
 	void sourceBuffer(volatile const signed int p[], unsigned int len) {
 		sourceBuffer((volatile const uint32_t *)p, len); }
+	#ifndef __clang__
 	void sourceBuffer(volatile const unsigned int p[], unsigned int len) {
 		sourceBuffer((volatile const uint32_t *)p, len); }
 	void sourceBuffer(volatile const signed long p[], unsigned int len) {
@@ -689,6 +698,18 @@ public:
 		CFG->DCR = (CFG->DCR & 0xF08E0FFF) | DMA_DCR_SSIZE(0) | DMA_DCR_SINC;
 		CFG->DSR_BCR = len;
 	}
+	#else 
+	void sourceBuffer(volatile const unsigned long p[], unsigned int len) {
+		sourceBuffer((volatile const uint32_t *)p, len); }
+	void sourceBuffer(volatile const signed long p[], unsigned int len) {
+		sourceBuffer((volatile const uint32_t *)p, len); }
+	void sourceBuffer(volatile const unsigned int p[], unsigned int len) {
+		if (len > 0xFFFFF) return;
+		CFG->SAR = p;
+		CFG->DCR = (CFG->DCR & 0xF08E0FFF) | DMA_DCR_SSIZE(0) | DMA_DCR_SINC;
+		CFG->DSR_BCR = len;
+	}
+	#endif
 
 	// Use a circular buffer as the data source
 	void sourceCircular(volatile const signed char p[], unsigned int len) {
@@ -713,6 +734,7 @@ public:
 	}
 	void sourceCircular(volatile const signed int p[], unsigned int len) {
 		sourceCircular((volatile const uint32_t *)p, len); }
+	#ifndef __clang__
 	void sourceCircular(volatile const unsigned int p[], unsigned int len) {
 		sourceCircular((volatile const uint32_t *)p, len); }
 	void sourceCircular(volatile const signed long p[], unsigned int len) {
@@ -725,6 +747,20 @@ public:
 			| DMA_DCR_SMOD(mod);
 		CFG->DSR_BCR = len;
 	}
+	#else 
+	void sourceCircular(volatile const unsigned long p[], unsigned int len) {
+		sourceCircular((volatile const uint32_t *)p, len); }
+	void sourceCircular(volatile const signed long p[], unsigned int len) {
+		sourceCircular((volatile const uint32_t *)p, len); }
+	void sourceCircular(volatile const unsigned int p[], unsigned int len) {
+		uint32_t mod = len2mod(len);
+		if (mod == 0) return;
+		CFG->SAR = p;
+		CFG->DCR = (CFG->DCR & 0xF08E0FFF) | DMA_DCR_SSIZE(0) | DMA_DCR_SINC
+			| DMA_DCR_SMOD(mod);
+		CFG->DSR_BCR = len;
+	}
+	#endif
 
 	// Use a single variable as the data destination.  Typically a register
 	// for transmitting data to one of the hardware peripherals is used.
@@ -739,12 +775,21 @@ public:
 		CFG->DCR = (CFG->DCR & 0xF0F0F0FF) | DMA_DCR_DSIZE(2);
 	}
 	void destination(volatile signed int &p) { destination(*(volatile uint32_t *)&p); }
+	#ifndef __clang__
 	void destination(volatile unsigned int &p) { destination(*(volatile uint32_t *)&p); }
 	void destination(volatile signed long &p) { destination(*(volatile uint32_t *)&p); }
 	void destination(volatile unsigned long &p) {
 		CFG->DAR = &p;
 		CFG->DCR = (CFG->DCR & 0xF0F0F0FF) | DMA_DCR_DSIZE(0);
 	}
+	#else 
+	void destination(volatile unsigned long &p) { destination(*(volatile uint32_t *)&p); }
+	void destination(volatile signed long &p) { destination(*(volatile uint32_t *)&p); }
+	void destination(volatile unsigned int &p) {
+		CFG->DAR = &p;
+		CFG->DCR = (CFG->DCR & 0xF0F0F0FF) | DMA_DCR_DSIZE(0);
+	}
+	#endif
 
 	// Use a buffer (array of data) as the data destination.  Typically a
 	// buffer for receiving data is used.
@@ -764,6 +809,7 @@ public:
 	}
 	void destinationBuffer(volatile signed int p[], unsigned int len) {
 		destinationBuffer((volatile uint32_t *)p, len); }
+	#ifndef __clang__
 	void destinationBuffer(volatile unsigned int p[], unsigned int len) {
 		destinationBuffer((volatile uint32_t *)p, len); }
 	void destinationBuffer(volatile signed long p[], unsigned int len) {
@@ -773,6 +819,17 @@ public:
 		CFG->DCR = (CFG->DCR & 0xF0F0F0FF) | DMA_DCR_DSIZE(0) | DMA_DCR_DINC;
 		CFG->DSR_BCR = len;
 	}
+	#else 
+	void destinationBuffer(volatile unsigned long p[], unsigned int len) {
+		destinationBuffer((volatile uint32_t *)p, len); }
+	void destinationBuffer(volatile signed long p[], unsigned int len) {
+		destinationBuffer((volatile uint32_t *)p, len); }
+	void destinationBuffer(volatile unsigned int p[], unsigned int len) {
+		CFG->DAR = p;
+		CFG->DCR = (CFG->DCR & 0xF0F0F0FF) | DMA_DCR_DSIZE(0) | DMA_DCR_DINC;
+		CFG->DSR_BCR = len;
+	}
+	#endif
 
 	// Use a circular buffer as the data destination
 	void destinationCircular(volatile signed char p[], unsigned int len) {
@@ -797,6 +854,7 @@ public:
 	}
 	void destinationCircular(volatile signed int p[], unsigned int len) {
 		destinationCircular((volatile uint32_t *)p, len); }
+	#ifndef __clang__
 	void destinationCircular(volatile unsigned int p[], unsigned int len) {
 		destinationCircular((volatile uint32_t *)p, len); }
 	void destinationCircular(volatile signed long p[], unsigned int len) {
@@ -809,6 +867,20 @@ public:
 			| DMA_DCR_DMOD(mod);
 		CFG->DSR_BCR = len;
 	}
+	#else
+	void destinationCircular(volatile unsigned long p[], unsigned int len) {
+		destinationCircular((volatile uint32_t *)p, len); }
+	void destinationCircular(volatile signed long p[], unsigned int len) {
+		destinationCircular((volatile uint32_t *)p, len); }
+	void destinationCircular(volatile unsigned int p[], unsigned int len) {
+		uint32_t mod = len2mod(len);
+		if (mod == 0) return;
+		CFG->DAR = p;
+		CFG->DCR = (CFG->DCR & 0xF0F0F0FF) | DMA_DCR_DSIZE(0) | DMA_DCR_DINC
+			| DMA_DCR_DMOD(mod);
+		CFG->DSR_BCR = len;
+	}
+	#endif
 
 	/*************************************************/
 	/**    Quantity of Data to Transfer             **/

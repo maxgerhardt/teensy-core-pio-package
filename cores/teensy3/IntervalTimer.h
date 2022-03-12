@@ -39,7 +39,7 @@ extern "C" {
 
 class IntervalTimer {
 private:
-	static const uint32_t MAX_PERIOD = UINT32_MAX / (F_BUS / 1000000.0);
+	static const uint64_t MAX_PERIOD = UINT32_MAX / (F_BUS / 1000000.0);
 public:
 	IntervalTimer() {
 		channel = NULL;
@@ -49,7 +49,7 @@ public:
 		end();
 	}
 	bool begin(void (*funct)(), unsigned int microseconds) {
-		if (microseconds == 0 || microseconds > MAX_PERIOD) return false;
+		if (microseconds == 0 || (double)microseconds > (double)MAX_PERIOD) return false;
 		uint32_t cycles = (F_BUS / 1000000) * microseconds - 1;
 		if (cycles < 36) return false;
 		return beginCycles(funct, cycles);
@@ -65,8 +65,8 @@ public:
 		return begin(funct, (int)microseconds);
 	}
 	bool begin(void (*funct)(), float microseconds) {
-		if (microseconds <= 0 || microseconds > MAX_PERIOD) return false;
-		uint32_t cycles = (float)(F_BUS / 1000000) * microseconds - 0.5;
+		if (microseconds <= 0 || (double)microseconds > (double)MAX_PERIOD) return false;
+		uint32_t cycles = (float)(F_BUS / 1000000U) * microseconds - 0.5;
 		if (cycles < 36) return false;
 		return beginCycles(funct, cycles);
 	}
@@ -74,8 +74,8 @@ public:
 		return begin(funct, (float)microseconds);
 	}
 	void update(unsigned int microseconds) {
-		if (microseconds == 0 || microseconds > MAX_PERIOD) return;
-		uint32_t cycles = (F_BUS / 1000000) * microseconds - 1;
+		if (microseconds == 0 || (double)microseconds > (double)MAX_PERIOD) return;
+		uint32_t cycles = (F_BUS / 1000000U) * microseconds - 1;
 		if (cycles < 36) return;
 		if (channel) channel->LDVAL = cycles;
 	}
@@ -90,8 +90,8 @@ public:
 		return update((int)microseconds);
 	}
 	void update(float microseconds) {
-		if (microseconds <= 0 || microseconds > MAX_PERIOD) return;
-		uint32_t cycles = (float)(F_BUS / 1000000) * microseconds - 0.5;
+		if (microseconds <= 0 || (double)microseconds > (double)MAX_PERIOD) return;
+		uint32_t cycles = (float)(F_BUS / 1000000U) * microseconds - 0.5;
 		if (cycles < 36) return;
 		if (channel) channel->LDVAL = cycles;
 	}
