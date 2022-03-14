@@ -681,9 +681,11 @@ void startup_early_hook(void)		__attribute__ ((weak, alias("startup_default_earl
 void startup_late_hook(void)		__attribute__ ((weak, alias("startup_default_late_hook")));
 
 
-#if defined(__PURE_CODE__) || !defined(__OPTIMIZE__) || defined(__clang__)
+#if (defined(__PURE_CODE__) || !defined(__OPTIMIZE__)) && !defined(__clang__)
 // cases known to compile too large for 0-0x400 memory region
 __attribute__ ((optimize("-Os")))
+#elif defined(__clang__)
+__attribute__ ((minsize))
 #else
 // hopefully all others fit into startup section (below 0x400)
 __attribute__ ((section(".startup"),optimize("-Os")))
